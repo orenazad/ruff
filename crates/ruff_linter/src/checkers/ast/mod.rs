@@ -936,6 +936,47 @@ impl<'a> Visitor<'a> for Checker<'a> {
                     }
                 }
             }
+            Stmt::Expr(ast::StmtExpr { value, range: _ }) => {
+                // Check if the expression is a call to oazad_load
+                if let Expr::Call(ast::ExprCall { func, arguments, range: _ }) = value.as_ref() {
+                    // Special handling for the oazad_load function
+                    if let Some(qualified_name) = self.semantic.resolve_qualified_name(func) {
+                        if qualified_name.segments() == ["bs", "oazad_load"] {
+                            // Validate arguments
+                            if arguments.args.len() == 2 {
+                                // Get module and symbol names
+                                let module = &arguments.args[0];
+                                let symbol = &arguments.args[1];
+
+                                // Convert to owned strings that will live long enough
+                                if let (Some(module_str), Some(symbol_str)) = (
+                                    module.as_string_literal_expr().map(|s| s.value.to_string()),
+                                    symbol.as_string_literal_expr().map(|s| s.value.to_string())
+                                ) {
+                                    // Create owned strings that live for 'a
+                                    let module_name = Box::leak(module_str.into_boxed_str());
+                                    let symbol_name = Box::leak(symbol_str.into_boxed_str());
+
+                                    // This should be module.symbol_name
+                                    // Create the qualified name with a 'static lifetime
+                                    let qualified_str = format!("{}.{}", module_name, symbol_name);
+                                    let qualified_name = Box::leak(qualified_str.into_boxed_str());
+                                    let symbol_qualified_name = QualifiedName::user_defined(qualified_name);
+
+                                    let new_id = self.add_binding(
+                                        symbol_name,
+                                        symbol.range(),
+                                        BindingKind::FromImport(FromImport {
+                                            qualified_name: Box::new(symbol_qualified_name)
+                                        }),
+                                        BindingFlags::EXTERNAL,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
 
